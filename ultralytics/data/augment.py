@@ -318,7 +318,7 @@ class Mosaic(BaseMixTransform):
             "mosaic_border": self.border,
         }
         final_labels["instances"].clip(imgsz, imgsz)
-        good = final_labels["instances"].remove_zero_area_boxes()
+        good = final_labels["instances"].remove_zero_area_boxes().astype(int)
         final_labels["cls"] = final_labels["cls"][good]
         return final_labels
 
@@ -552,7 +552,7 @@ class RandomPerspective:
         # Make the bboxes have the same scale with new_bboxes
         i = self.box_candidates(
             box1=instances.bboxes.T, box2=new_instances.bboxes.T, area_thr=0.01 if len(segments) else 0.10
-        )
+        ).astype(int)
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["img"] = img

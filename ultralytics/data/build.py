@@ -22,7 +22,7 @@ from ultralytics.data.loaders import (
 from ultralytics.data.utils import IMG_FORMATS, VID_FORMATS
 from ultralytics.utils import RANK, colorstr
 from ultralytics.utils.checks import check_file
-from .dataset import YOLODataset
+from .dataset import YOLODataset, RGBIRDataset
 from .utils import PIN_MEMORY
 
 
@@ -102,6 +102,26 @@ def build_yolo_dataset(cfg, img_path, batch, data, mode="train", rect=False, str
         fraction=cfg.fraction if mode == "train" else 1.0,
     )
 
+def build_rgbir_dataset(cfg, img_path, batch, data, mode="train", rect=False, stride=32):
+    """Build RGB-IR Dataset."""
+    return RGBIRDataset(
+        img_path=img_path,
+        imgsz=cfg.imgsz,
+        batch_size=batch,
+        augment=mode == "train",  # augmentation
+        hyp=cfg,  # TODO: probably add a get_hyps_from_cfg function
+        rect=cfg.rect or rect,  # rectangular batches
+        cache=cfg.cache or None,
+        single_cls=cfg.single_cls or False,
+        stride=int(stride),
+        pad=0.0 if mode == "train" else 0.5,
+        prefix=colorstr(f"{mode}: "),
+        task=cfg.task,
+        classes=cfg.classes,
+        data=data,
+        data_mode=cfg.data_mode,
+        fraction=cfg.fraction if mode == "train" else 1.0,
+    )
 
 def build_dataloader(dataset, batch, workers, shuffle=True, rank=-1):
     """Return an InfiniteDataLoader or DataLoader for training or validation set."""

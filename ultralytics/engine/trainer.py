@@ -136,6 +136,7 @@ class BaseTrainer:
         except Exception as e:
             raise RuntimeError(emojis(f"Dataset '{clean_url(self.args.data)}' error ❌ {e}")) from e
 
+        # 分别指出train和val数据集位置
         self.trainset, self.testset = self.get_dataset(self.data)
         self.ema = None
 

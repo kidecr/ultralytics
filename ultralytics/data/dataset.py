@@ -1,11 +1,16 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
+import os
 import contextlib
+import math
+import random
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 
 import cv2
 import numpy as np
+import psutil
+import glob
 import torch
 import torchvision
 from PIL import Image
@@ -14,7 +19,7 @@ from ultralytics.utils import LOCAL_RANK, NUM_THREADS, TQDM, colorstr, is_dir_wr
 from ultralytics.utils.ops import resample_segments
 from .augment import Compose, Format, Instances, LetterBox, classify_augmentations, classify_transforms, v8_transforms
 from .base import BaseDataset
-from .utils import HELP_URL, LOGGER, get_hash, img2label_paths, verify_image, verify_image_label
+from .utils import HELP_URL, LOGGER, IMG_FORMATS, get_hash, img2label_paths, verify_image, verify_image_label, rgb2ir_path, rgb2ir_paths
 
 # Ultralytics dataset *.cache version, >= 1.0.0 for YOLOv8
 DATASET_CACHE_VERSION = "1.0.3"
@@ -222,7 +227,300 @@ class YOLODataset(BaseDataset):
         new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
         return new_batch
 
+class RGBIRDataset(YOLODataset):
+    """
+    用于读取RGB和IR图片
+    
+    Args:
+        img_path (str): Path to the folder containing images.
+        imgsz (int, optional): Image size. Defaults to 640.
+        cache (bool, optional): Cache images to RAM or disk during training. Defaults to False.
+        augment (bool, optional): If True, data augmentation is applied. Defaults to True.
+        hyp (dict, optional): Hyperparameters to apply data augmentation. Defaults to None.
+        prefix (str, optional): Prefix to print in log messages. Defaults to ''.
+        rect (bool, optional): If True, rectangular training is used. Defaults to False.
+        batch_size (int, optional): Size of batches. Defaults to None.
+        stride (int, optional): Stride. Defaults to 32.
+        pad (float, optional): Padding. Defaults to 0.0.
+        single_cls (bool, optional): If True, single class training is used. Defaults to False.
+        classes (list): List of included classes. Default is None.
+        fraction (float): Fraction of dataset to utilize. Default is 1.0 (use all data).
 
+    Attributes:
+        im_files (list): List of image file paths. 为RGB图像路径
+        labels (list): List of label data dictionaries. 重新定义为list({rgb_infos, [rgb_bbox, ir_bbox]}), shape初始化为rgb图片大小, rgb和ir应该相同大小
+        ni (int): Number of images in the dataset.
+        ims (list): List of loaded images. 重新定义为list([rgb_im, ir_im])
+        npy_files (list): List of numpy file paths.
+        transforms (callable): Image transformation function.
+    """
+    def __init__(self, *args, data_mode = "RGBT", data=None, task="detect", **kwargs):
+        """Initializes the RGBIRDataset with optional configurations for segments and keypoints."""
+        self.use_segments = task == "segment"
+        self.use_keypoints = task == "pose"
+        self.use_obb = task == "obb"
+        self.data = data
+        self.data_mode = data_mode if data_mode in ("RGB", "T", "RGBT") else "RGBT"
+        super().__init__(*args, data=data, task=task, **kwargs)
+        
+    def get_img_files(self, img_path):
+        """Read image files. default read RGB path"""
+        try:
+            f = []  # image files
+            for p in img_path if isinstance(img_path, list) else [img_path]:
+                p = Path(p)  # os-agnostic
+                if p.is_dir():  # dir
+                    if self.data_mode in ("T", "IR"):
+                        f += glob.glob(str(p / "**"/ "IR" / "*.*"), recursive=True) # 读IR部分，之后会转成RGB路径
+                    else: 
+                        f += glob.glob(str(p / "**"/ "RGB" / "*.*"), recursive=True) # 读RGB部分，之后会转成IR路径
+                    # F = list(p.rglob('*.*'))  # pathlib
+                elif p.is_file():  # file
+                    with open(p) as t:
+                        t = t.read().strip().splitlines()
+                        parent = str(p.parent) + os.sep
+                        f += [x.replace("./", parent) if x.startswith("./") else x for x in t]  # local to global path
+                        # F += [p.parent / x.lstrip(os.sep) for x in t]  # local to global path (pathlib)
+                else:
+                    raise FileNotFoundError(f"{self.prefix}{p} does not exist")
+            im_files = sorted(x.replace("/", os.sep) for x in f if x.split(".")[-1].lower() in IMG_FORMATS)
+            # self.img_files = sorted([x for x in f if x.suffix[1:].lower() in IMG_FORMATS])  # pathlib
+            assert im_files, f"{self.prefix}No images found in {img_path}"
+        except Exception as e:
+            raise FileNotFoundError(f"{self.prefix}Error loading data from {img_path}\n{HELP_URL}") from e
+        if self.fraction < 1:
+            im_files = im_files[: round(len(im_files) * self.fraction)]
+        return im_files
+    
+    def load_image(self, i, rect_mode=True):
+        """Loads 1 or 2(rgb,ir) image from dataset index 'i', returns (rgb or ir or [rgb,ir])."""
+        im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
+        if im is None:  # not cached in RAM
+            if fn.exists():  # load npy
+                try:
+                    im = np.load(fn)
+                except Exception as e:
+                    LOGGER.warning(f"{self.prefix}WARNING ⚠️ Removing corrupt *.npy image file {fn} due to: {e}")
+                    Path(fn).unlink(missing_ok=True)
+                    # im = cv2.imread(f)  # BGR
+                    # 分别读取RGB和IR图片
+                    im = self.read_image(f)
+            else:  # read image
+                # im = cv2.imread(f)  # BGR
+                # 分别读取RGB和IR图片
+                im = self.read_image(f)
+            if im is None:
+                raise FileNotFoundError(f"Image Not Found {f}")
+
+
+            # 对两张图片分别进行resize
+            h0, w0 = im.shape[:2]  # orig hw
+            if rect_mode:  # resize long side to imgsz while maintaining aspect ratio
+                r = self.imgsz / max(h0, w0)  # ratio
+                if r != 1:  # if sizes are not equal
+                    w, h = (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz))
+                    im = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
+            elif not (h0 == w0 == self.imgsz):  # resize by stretching image to square imgsz
+                im = cv2.resize(im, (self.imgsz, self.imgsz), interpolation=cv2.INTER_LINEAR)
+
+            # Add to buffer if training with augmentations
+            if self.augment:
+                self.ims[i], self.im_hw0[i], self.im_hw[i] = im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
+                self.buffer.append(i)
+                if len(self.buffer) >= self.max_buffer_length:
+                    j = self.buffer.pop(0)
+                    self.ims[j], self.im_hw0[j], self.im_hw[j] = None, None, None
+
+            return im, (h0, w0), im.shape[:2]
+
+        return self.ims[i], self.im_hw0[i], self.im_hw[i]
+
+    def cache_images(self, cache):
+        """Cache images to memory or disk."""
+        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        fcn = self.cache_images_to_disk if cache == "disk" else self.load_image
+        with ThreadPool(NUM_THREADS) as pool:
+            results = pool.imap(fcn, range(self.ni))
+            pbar = TQDM(enumerate(results), total=self.ni, disable=LOCAL_RANK > 0)
+            for i, x in pbar:
+                if cache == "disk":
+                    b += self.npy_files[i].stat().st_size
+                else:  # 'ram'
+                    self.ims[i], self.im_hw0[i], self.im_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
+                    b += self.ims[i].nbytes
+                pbar.desc = f"{self.prefix}Caching images ({b / gb:.1f}GB {cache})"
+            pbar.close()
+            
+    def cache_images_to_disk(self, i):
+        """Saves an image as an *.npy file for faster loading."""
+        f = self.npy_files[i]
+        im = None
+        if not f.exists():
+            # 分别读取RGB和IR图片
+            im = self.read_image(f)
+            # 读取后同时保存两份图像
+            np.save(f.as_posix(), im, allow_pickle=False)
+            
+    def check_cache_ram(self, safety_margin=0.5):
+        """Check image caching requirements vs available memory."""
+        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        n = min(self.ni, 30)  # extrapolate from 30 random images
+        for _ in range(n):
+            im = self.read_image(random.choice(self.im_files))  # sample image
+            ratio = self.imgsz / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
+            b += (im.nbytes * ratio**2)
+        mem_required = b * self.ni / n * (1 + safety_margin)  # GB required to cache dataset into RAM
+        mem = psutil.virtual_memory()
+        cache = mem_required < mem.available  # to cache or not to cache, that is the question
+        if not cache:
+            LOGGER.info(
+                f'{self.prefix}{mem_required / gb:.1f}GB RAM required to cache images '
+                f'with {int(safety_margin * 100)}% safety margin but only '
+                f'{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, '
+                f"{'caching images ✅' if cache else 'not caching images ⚠️'}"
+            )
+        return cache
+    
+    def cache_labels(self, path=Path("./labels.cache")):
+        """
+        Cache dataset labels, check images and read shapes.
+        读取rgb和ir的label, 以rgb的label为主, ir只使用bbox
+        
+        Args:
+            path (Path): Path where to save the cache file. Default is Path('./labels.cache').
+
+        Returns:
+            (dict): labels.
+        """
+        x = {"labels": []}
+        nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
+        desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
+        total = len(self.im_files)
+        nkpt, ndim = self.data.get("kpt_shape", (0, 0))
+        if self.use_keypoints and (nkpt <= 0 or ndim not in (2, 3)):
+            raise ValueError(
+                "'kpt_shape' in data.yaml missing or incorrect. Should be a list with [number of "
+                "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
+            )
+        with ThreadPool(NUM_THREADS) as pool:
+            # 分别读取rgb和ir的label
+            if self.data_mode in ("RGBT"):
+                rgb_results = pool.imap(
+                    func=verify_image_label,
+                    iterable=zip(
+                        self.im_files,
+                        self.label_files,
+                        repeat(self.prefix),
+                        repeat(self.use_keypoints),
+                        repeat(len(self.data["names"])),
+                        repeat(nkpt),
+                        repeat(ndim),
+                    ),
+                )
+                
+                ir_results = pool.imap(
+                    func=verify_image_label,
+                    iterable=zip(
+                        rgb2ir_paths(self.im_files),
+                        rgb2ir_paths(self.label_files),
+                        repeat(self.prefix),
+                        repeat(self.use_keypoints),
+                        repeat(len(self.data["names"])),
+                        repeat(nkpt),
+                        repeat(ndim),
+                    ),
+                )
+                # 组织label信息
+                ir_lbs = [ir_lb for _, ir_lb, _, _, _, _, _, _, _, _ in ir_results]
+                pbar = TQDM(rgb_results, desc=desc, total=total)
+                i = 0
+                for rgb_im_file, rgb_lb, rgb_shape, rgb_segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+                    nm += nm_f
+                    nf += nf_f
+                    ne += ne_f
+                    nc += nc_f
+                    if rgb_im_file:
+                        x["labels"].append(
+                            dict(
+                                im_file=rgb_im_file,
+                                shape=rgb_shape,
+                                cls=np.concatenate((rgb_lb[:, 0:1], ir_lbs[i][:, 0:1]), axis=1).reshape(-1, 1), # n, 1
+                                bboxes=np.concatenate((rgb_lb[:, 1:], ir_lbs[i][:, 1:]), axis=1).reshape(-1, 4),  # n, 4
+                                segments=rgb_segments,
+                                keypoints=keypoint,
+                                normalized=True,
+                                bbox_format="xywh",
+                            )
+                        )
+                    if msg:
+                        msgs.append(msg)
+                    # pbar.desc = f"{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt"
+                    pbar.desc = f"{desc} {nf} images, {total} backgrounds, {nc} corrupt"
+                    i = i + 1
+                pbar.close()
+            else:
+                results = pool.imap(
+                    func=verify_image_label,
+                    iterable=zip(
+                        self.im_files,
+                        self.label_files,
+                        repeat(self.prefix),
+                        repeat(self.use_keypoints),
+                        repeat(len(self.data["names"])),
+                        repeat(nkpt),
+                        repeat(ndim),
+                    ),
+                )
+                
+                pbar = TQDM(rgb_results, desc=desc, total=total)
+                for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+                    nm += nm_f
+                    nf += nf_f
+                    ne += ne_f
+                    nc += nc_f
+                    if im_file:
+                        x["labels"].append(
+                            dict(
+                                im_file=im_file,
+                                shape=shape,
+                                cls=lb[:, 0:1], # n, 1
+                                bboxes=lb[:, 1:],  # n, 4
+                                segments=segments,
+                                keypoints=keypoint,
+                                normalized=True,
+                                bbox_format="xywh",
+                            )
+                        )
+                    if msg:
+                        msgs.append(msg)
+                    # pbar.desc = f"{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt"
+                    pbar.desc = f"{desc} {nf} images, {total} backgrounds, {nc} corrupt"
+                pbar.close()
+
+        if msgs:
+            LOGGER.info("\n".join(msgs))
+        if nf == 0:
+            LOGGER.warning(f"{self.prefix}WARNING ⚠️ No labels found in {path}. {HELP_URL}")
+        x["hash"] = get_hash(self.label_files + self.im_files)
+        x["results"] = nf, nm, ne, nc, len(self.im_files)
+        x["msgs"] = msgs  # warnings
+        save_dataset_cache_file(self.prefix, path, x)
+        return x
+    
+    def read_image(self, path):
+        # 分别读取RGB和IR图片
+        im = None
+        if self.data_mode in ("RGB"):
+            im = cv2.imread(path) # BGR
+        elif self.data_mode in ("T", "IR"):
+            im = cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
+        else:   # RGBT
+            rgb_im = cv2.imread(path) # BGR 
+            ir_im = cv2.imread(rgb2ir_path(path), cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
+            # im = [rgb_im, ir_im]
+            im = np.concatenate((rgb_im, ir_im), axis=2) 
+        return im
+    
 # Classification dataloaders -------------------------------------------------------------------------------------------
 class ClassificationDataset(torchvision.datasets.ImageFolder):
     """

@@ -45,6 +45,20 @@ def img2label_paths(img_paths):
     sa, sb = f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}"  # /images/, /labels/ substrings
     return [sb.join(x.rsplit(sa, 1)).rsplit(".", 1)[0] + ".txt" for x in img_paths]
 
+def rgb2ir_paths(rgb_paths):
+    """Define ir paths as a function of rgb paths."""
+    sa, sb = f"{os.sep}RGB{os.sep}", f"{os.sep}IR{os.sep}"  # /RGB/, /IR/ substrings
+    return [sb.join(x.rsplit(sa, 1)) for x in rgb_paths]
+
+def rgb2ir_path(rgb_path):
+    """Define ir paths as a function of rgb paths."""
+    sa, sb = f"{os.sep}RGB{os.sep}", f"{os.sep}IR{os.sep}"  # /RGB/, /IR/ substrings
+    return sb.join(rgb_path.rsplit(sa, 1))
+
+def ir2rgb_path(rgb_path):
+    """Define rgb paths as a function of ir paths."""
+    sa, sb = f"{os.sep}IR{os.sep}", f"{os.sep}RGB{os.sep}"  # /IR/, /RGB/ substrings
+    return sb.join(rgb_path.rsplit(sa, 1))
 
 def get_hash(paths):
     """Returns a single hash value of a list of paths (files or dirs)."""

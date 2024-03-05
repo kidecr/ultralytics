@@ -548,3 +548,24 @@ class BNContrastiveHead(nn.Module):
         w = F.normalize(w, dim=-1, p=2)
         x = torch.einsum("bchw,bkc->bkhw", x, w)
         return x * self.logit_scale.exp() + self.bias
+
+class SplitInputImage(nn.Module):
+    """
+    分割输入图片, 相当于执行image[:, :, start:end]
+
+    Args:
+        start (int): 开始的channel
+        end (int): 结束的channel
+    """
+
+    def __init__(self, start, end):
+        """Initialize ContrastiveHead with region-text similarity parameters."""
+        super().__init__()
+        self.start = start
+        self.end = end
+
+    def forward(self, x):
+        """Forward function of contrastive learning."""
+        x = x[:, self.start:self.end]
+        return x
+

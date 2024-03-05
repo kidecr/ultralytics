@@ -40,6 +40,7 @@ from .block import (
     ResNetLayer,
     ContrastiveHead,
     BNContrastiveHead,
+    SplitInputImage,
 )
 from .conv import (
     CBAM,
@@ -123,4 +124,5 @@ __all__ = (
     "ImagePoolingAttn",
     "ContrastiveHead",
     "BNContrastiveHead",
+    "SplitInputImage",
 )
