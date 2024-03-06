@@ -7,7 +7,7 @@ model = YOLO('./ultralytics/cfg/models/v8/yolov8-fusion.yaml')
 # model = YOLO('yolov8n.pt')
 
 # Train the model using the 'coco128.yaml' dataset for 3 epochs
-results = model.train(data='./ultralytics/cfg/datasets/Anti-UAV.yaml', epochs=200, device=2, batch=16, cache="ram", patience=20, data_mode="RGB", save_period=10, resume=False)
+results = model.train(data='./ultralytics/cfg/datasets/Anti-UAV.yaml', epochs=200, device=2, batch=16, cache="ram", patience=20, data_mode="RGB2", save_period=10, resume=False)
 
 # from ultralytics.models.yolo.detect import DetectionValidator
 

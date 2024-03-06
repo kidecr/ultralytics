@@ -245,6 +245,7 @@ class RGBIRDataset(YOLODataset):
         single_cls (bool, optional): If True, single class training is used. Defaults to False.
         classes (list): List of included classes. Default is None.
         fraction (float): Fraction of dataset to utilize. Default is 1.0 (use all data).
+        data_mode (str): select which type to load, 'RGBT' is read both rgb and ir image and labels, 'RGB' 'IR' 'T' is read single type image, 'RGBT2' is read rgbt type image with npy type 
 
     Attributes:
         im_files (list): List of image file paths. 为RGB图像路径
@@ -254,13 +255,13 @@ class RGBIRDataset(YOLODataset):
         npy_files (list): List of numpy file paths.
         transforms (callable): Image transformation function.
     """
-    def __init__(self, *args, data_mode = "RGBT", data=None, task="detect", **kwargs):
+    def __init__(self, *args, data_mode="RGBT", data=None, task="detect", **kwargs):
         """Initializes the RGBIRDataset with optional configurations for segments and keypoints."""
         self.use_segments = task == "segment"
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
         self.data = data
-        self.data_mode = data_mode if data_mode in ("RGB", "T", "RGBT") else "RGBT"
+        self.data_mode = data_mode if data_mode in ("RGB", "T", "IR", "RGBT", "RGBT2") else "RGBT" 
         super().__init__(*args, data=data, task=task, **kwargs)
         
     def get_img_files(self, img_path):
@@ -272,6 +273,8 @@ class RGBIRDataset(YOLODataset):
                 if p.is_dir():  # dir
                     if self.data_mode in ("T", "IR"):
                         f += glob.glob(str(p / "**"/ "IR" / "*.*"), recursive=True) # 读IR部分，之后会转成RGB路径
+                    elif self.data_mode in ("RGBT2"):
+                        f += glob.glob(str(p / "**"/ "RGBT" / "*.*"), recursive=True) # 读RGBT部分，之后会转成RGB路径
                     else: 
                         f += glob.glob(str(p / "**"/ "RGB" / "*.*"), recursive=True) # 读RGB部分，之后会转成IR路径
                     # F = list(p.rglob('*.*'))  # pathlib
@@ -514,6 +517,8 @@ class RGBIRDataset(YOLODataset):
             im = cv2.imread(path) # BGR
         elif self.data_mode in ("T", "IR"):
             im = cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
+        elif self.data_mode in ("RGBT2"):
+            im = np.load(path) # load BGRT type image in npy format
         else:   # RGBT
             rgb_im = cv2.imread(path) # BGR 
             ir_im = cv2.imread(rgb2ir_path(path), cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
