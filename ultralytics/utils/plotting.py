@@ -117,6 +117,8 @@ class Annotator:
         self.pil = pil or non_ascii or input_is_pil
         self.lw = line_width or max(round(sum(im.size if input_is_pil else im.shape) / 2 * 0.003), 2)
         if self.pil:  # use PIL
+            if im.shape[2] > 3: # 对于高通道的图片，按BGR处理
+                im = im[:, :, :3]
             self.im = im if input_is_pil else Image.fromarray(im)
             self.draw = ImageDraw.Draw(self.im)
             try:

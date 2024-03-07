@@ -273,7 +273,7 @@ class RGBIRDataset(YOLODataset):
                 if p.is_dir():  # dir
                     if self.data_mode in ("T", "IR"):
                         f += glob.glob(str(p / "**"/ "IR" / "*.*"), recursive=True) # 读IR部分，之后会转成RGB路径
-                    elif self.data_mode in ("RGBT2"):
+                    elif self.data_mode in ("RGBT2",):
                         f += glob.glob(str(p / "**"/ "RGBT" / "*.*"), recursive=True) # 读RGBT部分，之后会转成RGB路径
                     else: 
                         f += glob.glob(str(p / "**"/ "RGB" / "*.*"), recursive=True) # 读RGB部分，之后会转成IR路径
@@ -407,7 +407,7 @@ class RGBIRDataset(YOLODataset):
             )
         with ThreadPool(NUM_THREADS) as pool:
             # 分别读取rgb和ir的label
-            if self.data_mode in ("RGBT"):
+            if self.data_mode in ("RGBT",):
                 rgb_results = pool.imap(
                     func=verify_image_label,
                     iterable=zip(
@@ -418,6 +418,7 @@ class RGBIRDataset(YOLODataset):
                         repeat(len(self.data["names"])),
                         repeat(nkpt),
                         repeat(ndim),
+                        repeat(self.data_mode),
                     ),
                 )
                 
@@ -431,6 +432,7 @@ class RGBIRDataset(YOLODataset):
                         repeat(len(self.data["names"])),
                         repeat(nkpt),
                         repeat(ndim),
+                        repeat(self.data_mode),self.data_mode,
                     ),
                 )
                 # 组织label信息
@@ -472,10 +474,11 @@ class RGBIRDataset(YOLODataset):
                         repeat(len(self.data["names"])),
                         repeat(nkpt),
                         repeat(ndim),
+                        repeat(self.data_mode),
                     ),
                 )
                 
-                pbar = TQDM(rgb_results, desc=desc, total=total)
+                pbar = TQDM(results, desc=desc, total=total)
                 for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                     nm += nm_f
                     nf += nf_f
@@ -513,11 +516,11 @@ class RGBIRDataset(YOLODataset):
     def read_image(self, path):
         # 分别读取RGB和IR图片
         im = None
-        if self.data_mode in ("RGB"):
+        if self.data_mode in ("RGB",):
             im = cv2.imread(path) # BGR
         elif self.data_mode in ("T", "IR"):
             im = cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
-        elif self.data_mode in ("RGBT2"):
+        elif self.data_mode in ("RGBT2",):
             im = np.load(path) # load BGRT type image in npy format
         else:   # RGBT
             rgb_im = cv2.imread(path) # BGR 

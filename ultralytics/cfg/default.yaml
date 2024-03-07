@@ -4,6 +4,7 @@
 task: detect # (str) YOLO task, i.e. detect, segment, classify, pose
 mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmark
 data_mode: # (str) data mode, i.e. RGB RGBT T
+# ch: 4 # input channel, default.yaml和yolov8-fusion.yaml都需要改
 
 # Train settings -------------------------------------------------------------------------------------------------------
 model: # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
