@@ -28,9 +28,9 @@ class DetectionValidator(BaseValidator):
         ```
     """
 
-    def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
+    def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None, ch=3):
         """Initialize detection model with necessary variables and settings."""
-        super().__init__(dataloader, save_dir, pbar, args, _callbacks)
+        super().__init__(dataloader, save_dir, pbar, args, _callbacks, ch)
         self.nt_per_class = None
         self.is_coco = False
         self.class_map = None

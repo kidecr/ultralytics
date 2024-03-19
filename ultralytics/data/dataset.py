@@ -77,6 +77,7 @@ class YOLODataset(BaseDataset):
                     repeat(len(self.data["names"])),
                     repeat(nkpt),
                     repeat(ndim),
+                    repeat("RGB")
                 ),
             )
             pbar = TQDM(results, desc=desc, total=total)
@@ -369,7 +370,11 @@ class RGBIRDataset(YOLODataset):
         b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
-            im = self.read_image(random.choice(self.im_files))  # sample image
+            image_path = random.choice(self.im_files)
+            if '.npy' in image_path:
+                im = np.load(image_path)
+            else:
+                im = cv2.imread(image_path)  # sample image
             ratio = self.imgsz / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
             b += (im.nbytes * ratio**2)
         mem_required = b * self.ni / n * (1 + safety_margin)  # GB required to cache dataset into RAM
@@ -432,7 +437,7 @@ class RGBIRDataset(YOLODataset):
                         repeat(len(self.data["names"])),
                         repeat(nkpt),
                         repeat(ndim),
-                        repeat(self.data_mode),self.data_mode,
+                        repeat(self.data_mode),
                     ),
                 )
                 # 组织label信息

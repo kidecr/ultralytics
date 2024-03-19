@@ -289,8 +289,8 @@ class Instances:
         """
         segments = self.segments[index] if len(self.segments) else self.segments
         keypoints = self.keypoints[index] if self.keypoints is not None else None
-        if isinstance(index, np.ndarray):
-            index = index > 0 # 将index转为bool数组，否则会将index内容作为下标进行索引
+        # if isinstance(index, np.ndarray):
+        #     index = index > 0 # 将index转为bool数组，否则会将index内容作为下标进行索引
         bboxes = self.bboxes[index]
         bbox_format = self._bboxes.format
         return Instances(

@@ -41,6 +41,7 @@ from .block import (
     ContrastiveHead,
     BNContrastiveHead,
     SplitInputImage,
+    FusionTransformerDecoder,
 )
 from .conv import (
     CBAM,

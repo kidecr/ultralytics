@@ -13,39 +13,64 @@ scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call 
   l: [1.00, 1.00, 512] # YOLOv8l summary: 365 layers, 43691520 parameters, 43691504 gradients, 165.7 GFLOPs
   x: [1.00, 1.25, 512] # YOLOv8x summary: 365 layers, 68229648 parameters, 68229632 gradients, 258.5 GFLOPs
 
-scale: 'l'
+scale: 'n'
 
 # YOLOv8.0n backbone
 backbone:
   # [from, repeats, module, args]
-  # - [-1, 1, SplitInputImage, [0, 3]]
-  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
-  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
-  - [-1, 3, C2f, [128, True]]
-  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
-  - [-1, 6, C2f, [256, True]]
-  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
-  - [-1, 6, C2f, [512, True]]
-  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
-  - [-1, 3, C2f, [1024, True]]
-  - [-1, 1, SPPF, [1024, 5]] # 9
+  # - [-1, 1, SplitInputImage, [0, 3]] # args: ch_out from_channel to_channel
+  # - [[-1, 2], 1, FusionTransformerDecoder, [16, 3]] # args: patch_size, d_model, n_head, n_layer
+  # - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2 args: out_channel, kernel_size stride
+  # - [-1, 3, C2f, [128, True]] args: ch_out, shortcut, groups
+  - [-1, 1, nn.Identity, []] # layer0 直出
+  - [0, 1, SplitInputImage, [3, 0, 3]] # layer1 获得RGB部分
+  - [0, 1, SplitInputImage, [1, 3, -1]] # layer2 获得IR部分
+
+  # RGB的backbone
+  - [1, 1, Conv, [64, 3, 2]] # 0-P1/2         # layer3 从layer1接收RGB输入
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4       # layer4
+  - [-1, 3, C2f, [128, True]]                 # layer5
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8       # layer6
+  - [-1, 6, C2f, [256, True]] # 该层为b输出到B # layer7
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16      # layer8
+  - [-1, 6, C2f, [512, True]] # 该层为a输出到A # layer9
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32     # layer10
+  - [-1, 3, C2f, [1024, True]]                # layer11
+  - [-1, 1, SPPF, [1024, 5]] # 9 # 该层为d输出到D # layer12
+
+  # IR的backbone
+  - [2, 1, Conv, [64, 3, 2]] # 0-P1/2         # layer13 从layer2接收IR输入
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4       # layer14
+  - [-1, 3, C2f, [128, True]]                 # layer15
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8       # layer16
+  - [-1, 6, C2f, [256, True]] # 该层为b输出到B # layer17
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16      # layer18
+  - [-1, 6, C2f, [512, True]] # 该层为a输出到A # layer19
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32     # layer20
+  - [-1, 3, C2f, [1024, True]]                # layer21
+  - [-1, 1, SPPF, [1024, 5]] # 9 # 该层为d输出到D # layer22
+
+  # 融合模块
+  - [[7, 17], 1, FusionTransformerDecoder, [16, 512]] # layer23 对应b-B
+  - [[9, 19], 1, FusionTransformerDecoder, [10, 512]] # layer24 对应a-A
+  - [[12, 22], 1, FusionTransformerDecoder, [10, 512]] # layer25 对应d-D
 
 # YOLOv8.0n head
 head:
-  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
-  - [[-1, 6], 1, Concat, [1]] # cat backbone P4
-  - [-1, 3, C2f, [512]] # 12
+  - [25, 1, nn.Upsample, [None, 2, "nearest"]] # 从d输入              # layer26
+  - [[-1, 24], 1, Concat, [1]] # cat backbone P4 # 该层为A输入为a     # layer27
+  - [-1, 3, C2f, [512]] # 12 # 该层为c输出到C                         # layer28
 
-  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
-  - [[-1, 4], 1, Concat, [1]] # cat backbone P3
-  - [-1, 3, C2f, [256]] # 15 (P3/8-small)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]                        # layer29
+  - [[-1, 23], 1, Concat, [1]] # cat backbone P3 # 该层为B输入为b      # layer30
+  - [-1, 3, C2f, [256]] # 15 (P3/8-small)  # 输出到Detect             # layer31
 
-  - [-1, 1, Conv, [256, 3, 2]]
-  - [[-1, 12], 1, Concat, [1]] # cat head P4
-  - [-1, 3, C2f, [512]] # 18 (P4/16-medium)
+  - [-1, 1, Conv, [256, 3, 2]]                                       # layer32
+  - [[-1, 28], 1, Concat, [1]] # cat head P4 # 该层为C出入为c         # layer33
+  - [-1, 3, C2f, [512]] # 18 (P4/16-medium) # 输出到Detect           # layer34
 
-  - [-1, 1, Conv, [512, 3, 2]]
-  - [[-1, 9], 1, Concat, [1]] # cat head P5
-  - [-1, 3, C2f, [1024]] # 21 (P5/32-large)
+  - [-1, 1, Conv, [512, 3, 2]]                                      # layer35
+  - [[-1, 25], 1, Concat, [1]] # cat head P5 # 该层为D输出到d         # layer36
+  - [-1, 3, C2f, [1024]] # 21 (P5/32-large) # 输出到Detect          # layer37
 
-  - [[15, 18, 21], 1, Detect, [nc]] # Detect(P3, P4, P5)
+  - [[31, 34, 37], 1, Detect, [nc]] # Detect(P3, P4, P5)            # layer38

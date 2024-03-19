@@ -4,6 +4,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional
+from torch import Tensor
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv
 from .transformer import TransformerBlock
@@ -31,6 +33,7 @@ __all__ = (
     "Proto",
     "RepC3",
     "ResNetLayer",
+    "FusionTransformerDecoder",
 )
 
 
@@ -569,3 +572,182 @@ class SplitInputImage(nn.Module):
         x = x[:, self.start:self.end]
         return x
 
+
+class FusionTransformerDecoderLayer(nn.TransformerDecoderLayer):
+    """
+    重载TransformerDecoderLayer的forward函数, 改为先在W*H方向自注意力, 再在C方向交叉注意力
+    """
+    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+        r"""Pass the inputs (and mask) through the decoder layer.
+
+        Args:
+            tgt: the sequence to the decoder layer (required).
+            memory: the sequence from the last layer of the encoder (required).
+            tgt_mask: the mask for the tgt sequence (optional).
+            memory_mask: the mask for the memory sequence (optional).
+            tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
+            memory_key_padding_mask: the mask for the memory keys per batch (optional).
+
+        Shape:
+            see the docs in Transformer class.
+        """
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+
+        x = tgt
+        if self.norm_first:
+            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
+            x.transpose(2, 1)
+            memory.transpose(2, 1)
+            # memory_mask.transpose(2, 1)
+            # memory_key_padding_mask.transpose(2, 1)
+            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
+            x = x + self._ff_block(self.norm3(x))
+            x.transpose(1, 2)
+        else:
+            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
+            x.transpose(2, 1)
+            memory.transpose(2, 1)
+            # memory_mask.transpose(2, 1)
+            # memory_key_padding_mask.transpose(2, 1)
+            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
+            x = self.norm3(x + self._ff_block(x))
+            x.transpose(1, 2)
+
+        return x
+
+class FusionTransformerDecoder(nn.Module):
+    """
+    使用Transformer Decoder作为融合方法
+
+    Args:
+        # input_channel (int): 输入的feature map channel
+        patch_size (int): pathc大小
+        d_model (int): model大小, 默认512
+        n_head (int): 多头注意力大小, 默认8
+        n_layer (int): 使用几层transformer, 默认2
+    """
+    def __init__(self, input_channel, patch_size, d_model=512, n_head=8, n_layer=2) -> None:
+        super().__init__()
+        self.input_channel = input_channel
+        self.d_model = d_model
+        self.patch_size = patch_size
+        self.conv = nn.Conv2d(
+                in_channels=self.input_channel, out_channels=d_model, kernel_size=patch_size, stride=patch_size
+            )
+        self.conv_t = nn.ConvTranspose2d(
+            in_channels=d_model, out_channels=self.input_channel, kernel_size=patch_size, stride=patch_size
+        )
+        # self.L1 = nn.Linear(self.input_channel, d_model)
+        # self.L2 = nn.Linear(d_model, self.input_channel)
+        self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=1024)
+        self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=n_layer)
+    
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:    
+        """
+        Args:
+            x: the sequence to the decoder (required).
+            y: the sequence from the last layer of the encoder (required).
+        """
+        x_shape = x.shape
+        # y_shape = y.shape
+        # embed_x = self.embedding(x, self.patch_size)
+        # embed_y = self.embedding(y, self.patch_size)
+        embed_x = self._process_input(x)
+        embed_y = self._process_input(y)
+        embed_fusion = self.transformer_decoder(embed_x, embed_y)
+        # embed_fusion = self.unembedding(embed_fusion, x_shape, self.patch_size)
+        embed_fusion = self._process_output(embed_fusion, x_shape)
+        return embed_fusion
+    
+    
+    def _process_input(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        VIT原embedding函数
+        """
+        n, c, h, w = x.shape
+        p = self.patch_size
+        torch._assert(h % p == 0, f"feature map 'h' cannot div into patch, h:{h} p:{p}")
+        torch._assert(w % p == 0, f"feature map 'w' cannot div into patch, w:{w} p:{p}")
+        n_h = h // p
+        n_w = w // p
+
+        # (n, c, h, w) -> (n, hidden_dim, n_h, n_w)
+        x = self.conv(x)
+        # (n, hidden_dim, n_h, n_w) -> (n, hidden_dim, (n_h * n_w))
+        x = x.reshape(n, self.d_model, n_h * n_w)
+
+        # (n, hidden_dim, (n_h * n_w)) -> (n, (n_h * n_w), hidden_dim)
+        # The self attention layer expects inputs in the format (N, S, E)
+        # where S is the source sequence length, N is the batch size, E is the
+        # embedding dimension
+        # embedding dimension should be equal to d_model!!
+        x = x.permute(0, 2, 1)
+        
+        return x
+    
+    def _process_output(self, x: torch.Tensor, input_shape: torch.Size) -> torch.Tensor:
+        """
+        还原feature map
+        """
+        n, c, h, w = input_shape
+        p = self.patch_size
+        torch._assert(h % p == 0, f"feature map 'h' cannot div into patch, h:{h} p:{p}")
+        torch._assert(w % p == 0, f"feature map 'w' cannot div into patch, w:{w} p:{p}")
+        n_h = h // p
+        n_w = w // p
+
+        # (N, S, E) -> (n, hidden_dim, (n_h * n_w)) -> (n, hidden_dim, n_h, h_w)
+        x = x.permute(0, 2, 1).reshape(n, self.d_model, n_h, n_w)
+        # (n, hidden_dim, n_h, n_w) -> (n, c, h, w)
+        x = self.conv_t(x)
+        # (n, hidden_dim, n_h, n_w) -> (n, hidden_dim, (n_h * n_w))
+        # x = x.reshape(n, self.input_channel, n_h * n_w)
+
+        # (n, hidden_dim, (n_h * n_w)) -> (n, (n_h * n_w), hidden_dim)
+        # The self attention layer expects inputs in the format (N, S, E)
+        # where S is the source sequence length, N is the batch size, E is the
+        # embedding dimension
+        # embedding dimension should be equal to d_model!!
+        # x = x.permute(0, 2, 1)
+        
+        return x
+    
+    def embedding(self, x: torch.Tensor, patch_size: int) -> torch.Tensor:
+        p = patch_size
+        b, c, h, w = x.shape
+        torch._assert(h % p == 0, f"feature map 'h' cannot div into patch, h:{h} p:{p}")
+        torch._assert(w % p == 0, f"feature map 'w' cannot div into patch, w:{w} p:{p}")
+        n_h = h // p
+        n_w = w // p
+        
+        # (b, c, h, w) -> (b, c, n_h, p, n_w, p)
+        x = x.view(b, c, n_h, p, n_w, p)
+        # (b, c, n_h, p, n_w, p) -> (b, c, (p * p), (n_h * n_w)) -> (b, c, patch, len)
+        x = x.permute(0, 1, 3, 5, 2, 4).reshape(b, c, p * p, n_h * n_w)
+        # (b, c, patch, len) -> (b, (c * patch), len)
+        x = x.view(b, -1, n_h * n_w)
+        # The self attention layer expects inputs in the format (N, S, E)
+        # where S is the source sequence length, N is the batch size, E is the
+        # embedding dimension
+        # embedding dimension should be equal to d_model!!
+        x = x.permute(0, 2, 1)
+        # x = self.L1(x)
+        return x
+    
+    def unembedding(self, x: torch.Tensor, input_shape: torch.Size, patch_size: int) -> torch.Tensor:
+        p = patch_size
+        b, c, h, w = input_shape
+        batch_size, seq_len, emb_dim  = x.shape
+        n_h = h // p
+        n_w = w // p
+        torch._assert(emb_dim == c * p * p, f"emb_dim wrong! emb_dim:{emb_dim}, c:{c}, p:{p}")
+        torch._assert(seq_len == n_h * n_w, f"seq_len wrong! n_h:{n_h}, n_w:{n_w}")
+        torch._assert(b == batch_size, f"batch size not equal! input tensor has batch_size {batch_size}, but should be {b}")
+        
+        # (N, S, E) -> (b, (c * patch), len)
+        x = x.permute(0, 2, 1)
+        # (b, (c * patch), len) -> (b, c, p, p, n_h, n_w) -> (b, c, n_h, p, n_w, p)
+        x = x.reshape(b, c, p, p, n_h, n_w).permute(0, 1, 4, 2, 5, 3)
+        x = x.reshape(b, c, h, w)
+        return x
