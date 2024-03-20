@@ -643,12 +643,15 @@ class FusionTransformerDecoder(nn.Module):
         self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=1024)
         self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=n_layer)
     
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:    
+    def forward(self, x: list) -> torch.Tensor:    
         """
         Args:
-            x: the sequence to the decoder (required).
-            y: the sequence from the last layer of the encoder (required).
+            x: list of tensor [tensor from decoder, tensor from encoder]
+            # x: the sequence to the decoder (required).
+            # y: the sequence from the last layer of the encoder (required).
         """
+        y = x[1]
+        x = x[0]
         x_shape = x.shape
         # y_shape = y.shape
         # embed_x = self.embedding(x, self.patch_size)

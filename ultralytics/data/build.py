@@ -114,7 +114,7 @@ def build_rgbir_dataset(cfg, img_path, batch, data, mode="train", rect=False, st
         cache=cfg.cache or None,
         single_cls=cfg.single_cls or False,
         stride=int(stride),
-        pad=0.0 if mode == "train" else 0.5,
+        pad=0.0, #if mode == "train" else 0.5,
         prefix=colorstr(f"{mode}: "),
         task=cfg.task,
         classes=cfg.classes,

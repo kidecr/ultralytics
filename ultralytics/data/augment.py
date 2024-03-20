@@ -975,7 +975,7 @@ def v8_transforms(dataset, imgsz, hyp, stretch=False):
         [
             Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic),
             CopyPaste(p=hyp.copy_paste),
-            RandomPerspective(
+            RandomPerspective( # 随机视角变化：仿射变换
                 degrees=hyp.degrees,
                 translate=hyp.translate,
                 scale=hyp.scale,
@@ -985,7 +985,7 @@ def v8_transforms(dataset, imgsz, hyp, stretch=False):
             ),
         ]
     )
-    flip_idx = dataset.data.get("flip_idx", [])  # for keypoints augmentation
+    flip_idx = dataset.data.get("flip_idx", [])  # for keypoints augmentation 
     if dataset.use_keypoints:
         kpt_shape = dataset.data.get("kpt_shape", None)
         if len(flip_idx) == 0 and hyp.fliplr > 0.0:
@@ -1000,7 +1000,7 @@ def v8_transforms(dataset, imgsz, hyp, stretch=False):
             MixUp(dataset, pre_transform=pre_transform, p=hyp.mixup),
             Albumentations(p=1.0),
             RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v),
-            RandomFlip(direction="vertical", p=hyp.flipud),
+            RandomFlip(direction="vertical", p=hyp.flipud),                 # flip：图像翻转
             RandomFlip(direction="horizontal", p=hyp.fliplr, flip_idx=flip_idx),
         ]
     )  # transforms

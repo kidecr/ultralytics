@@ -24,7 +24,7 @@ backbone:
   # - [-1, 3, C2f, [128, True]] args: ch_out, shortcut, groups
   - [-1, 1, nn.Identity, []] # layer0 直出
   - [0, 1, SplitInputImage, [3, 0, 3]] # layer1 获得RGB部分
-  - [0, 1, SplitInputImage, [1, 3, -1]] # layer2 获得IR部分
+  - [0, 1, SplitInputImage, [1, 3, 4]] # layer2 获得IR部分
 
   # RGB的backbone
   - [1, 1, Conv, [64, 3, 2]] # 0-P1/2         # layer3 从layer1接收RGB输入
@@ -50,10 +50,10 @@ backbone:
   - [-1, 3, C2f, [1024, True]]                # layer21
   - [-1, 1, SPPF, [1024, 5]] # 9 # 该层为d输出到D # layer22
 
-  # 融合模块
-  - [[7, 17], 1, FusionTransformerDecoder, [16, 512]] # layer23 对应b-B
-  - [[9, 19], 1, FusionTransformerDecoder, [10, 512]] # layer24 对应a-A
-  - [[12, 22], 1, FusionTransformerDecoder, [10, 512]] # layer25 对应d-D
+  # 融合模块                                                                   # input size bxcx640x640
+  - [[7, 17], 1, FusionTransformerDecoder, [16, 512, 8, 1]] # layer23 对应b-B  # bx64x80x80
+  - [[9, 19], 1, FusionTransformerDecoder, [8, 512, 8, 1]]  # layer24 对应a-A  # bx128x40x40
+  - [[12, 22], 1, FusionTransformerDecoder, [4, 512, 8, 1]] # layer25 对应d-D  # bx256x20x20
 
 # YOLOv8.0n head
 head:

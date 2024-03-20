@@ -898,7 +898,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = args[0] # 输出通道大小
             args = [*args[1:]]
         elif m is FusionTransformerDecoder:
-            c1 = c2 = ch[f]
+            c1 = c2 = ch[f[0] if isinstance(f, list) else f]
             args = [c1, *args]
         else:
             c2 = ch[f]
