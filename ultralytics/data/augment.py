@@ -318,7 +318,7 @@ class Mosaic(BaseMixTransform):
             "mosaic_border": self.border,
         }
         final_labels["instances"].clip(imgsz, imgsz)
-        good = final_labels["instances"].remove_zero_area_boxes().astype(int)
+        good = final_labels["instances"].remove_zero_area_boxes() #.astype(int)
         final_labels["cls"] = final_labels["cls"][good]
         return final_labels
 
@@ -552,7 +552,7 @@ class RandomPerspective:
         # Make the bboxes have the same scale with new_bboxes
         i = self.box_candidates(
             box1=instances.bboxes.T, box2=new_instances.bboxes.T, area_thr=0.01 if len(segments) else 0.10
-        ).astype(int)
+        ).astype(bool) # .astype(int)
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["img"] = img
@@ -578,7 +578,14 @@ class RandomPerspective:
         w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
         w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
         ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
-        return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
+        candidates = np.logical_and.reduce([  
+            w2 > wh_thr,  
+            h2 > wh_thr,  
+            w2 * h2 / (w1 * h1 + eps) > area_thr,  
+            ar < ar_thr  
+        ])  
+        #return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
+        return candidates
 
 
 class RandomHSV:

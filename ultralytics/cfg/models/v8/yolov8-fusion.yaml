@@ -51,8 +51,8 @@ backbone:
   - [-1, 1, SPPF, [1024, 5]] # 9 # 该层为d输出到D # layer22
 
   # 融合模块                                                                   # input size bxcx640x640
-  - [[7, 17], 1, FusionTransformerDecoder, [16, 512, 8, 1]] # layer23 对应b-B  # bx64x80x80
-  - [[9, 19], 1, FusionTransformerDecoder, [8, 512, 8, 1]]  # layer24 对应a-A  # bx128x40x40
+  - [[7, 17], 1, FusionTransformerDecoder, [16, 128, 8, 1]] # layer23 对应b-B  # bx64x80x80
+  - [[9, 19], 1, FusionTransformerDecoder, [8, 256, 8, 1]]  # layer24 对应a-A  # bx128x40x40
   - [[12, 22], 1, FusionTransformerDecoder, [4, 512, 8, 1]] # layer25 对应d-D  # bx256x20x20
 
 # YOLOv8.0n head

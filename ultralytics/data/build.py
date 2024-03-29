@@ -108,7 +108,7 @@ def build_rgbir_dataset(cfg, img_path, batch, data, mode="train", rect=False, st
         img_path=img_path,
         imgsz=cfg.imgsz,
         batch_size=batch,
-        augment=mode == "train",  # augmentation
+        augment = (mode == "train" and cfg.augment) if cfg.augment is not None else False,  # augmentation 
         hyp=cfg,  # TODO: probably add a get_hyps_from_cfg function
         rect=cfg.rect or rect,  # rectangular batches
         cache=cfg.cache or None,

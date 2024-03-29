@@ -578,7 +578,8 @@ class FusionTransformerDecoderLayer(nn.TransformerDecoderLayer):
     重载TransformerDecoderLayer的forward函数, 改为先在W*H方向自注意力, 再在C方向交叉注意力
     """
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None,
+                tgt_is_causal: bool = False, memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -597,23 +598,12 @@ class FusionTransformerDecoderLayer(nn.TransformerDecoderLayer):
         x = tgt
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
-            x.transpose(2, 1)
-            memory.transpose(2, 1)
-            # memory_mask.transpose(2, 1)
-            # memory_key_padding_mask.transpose(2, 1)
             x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
-            x = x + self._ff_block(self.norm3(x))
-            x.transpose(1, 2)
+            # x = x + self._ff_block(self.norm3(x))
         else:
             x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
-            x.transpose(2, 1)
-            memory.transpose(2, 1)
-            # memory_mask.transpose(2, 1)
-            # memory_key_padding_mask.transpose(2, 1)
             x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
-            x = self.norm3(x + self._ff_block(x))
-            x.transpose(1, 2)
-
+            # x = self.norm3(x + self._ff_block(x))
         return x
 
 class FusionTransformerDecoder(nn.Module):
@@ -640,7 +630,7 @@ class FusionTransformerDecoder(nn.Module):
         )
         # self.L1 = nn.Linear(self.input_channel, d_model)
         # self.L2 = nn.Linear(d_model, self.input_channel)
-        self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=1024)
+        self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=1024, norm_first=True)
         self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=n_layer)
     
     def forward(self, x: list) -> torch.Tensor:    
@@ -661,7 +651,7 @@ class FusionTransformerDecoder(nn.Module):
         embed_fusion = self.transformer_decoder(embed_x, embed_y)
         # embed_fusion = self.unembedding(embed_fusion, x_shape, self.patch_size)
         embed_fusion = self._process_output(embed_fusion, x_shape)
-        return embed_fusion
+        return embed_fusion + x
     
     
     def _process_input(self, x: torch.Tensor) -> torch.Tensor:

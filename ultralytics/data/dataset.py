@@ -197,6 +197,7 @@ class YOLODataset(BaseDataset):
         keypoints = label.pop("keypoints", None)
         bbox_format = label.pop("bbox_format")
         normalized = label.pop("normalized")
+        assert bboxes.shape[0] == label['cls'].shape[0], f"bbox num not equal to cls num, bbox shape {bboxes.shape}, cls shape {label['cls'].shape}"
 
         # NOTE: do NOT resample oriented boxes
         segment_resamples = 100 if self.use_obb else 1000
@@ -246,7 +247,9 @@ class RGBIRDataset(YOLODataset):
         single_cls (bool, optional): If True, single class training is used. Defaults to False.
         classes (list): List of included classes. Default is None.
         fraction (float): Fraction of dataset to utilize. Default is 1.0 (use all data).
-        data_mode (str): select which type to load, 'RGBT' is read both rgb and ir image and labels, 'RGB' 'IR' 'T' is read single type image, 'RGBT2' is read rgbt type image with npy type 
+        data_mode (str): select which type to load, 'RGBT' is read both rgb and ir image and labels, 
+            'RGB' 'IR' 'T' is read single type image, 'RGBT2' is read rgbt type image with npy type, 
+            'RGBT3' is read rgb&t image with jpg type and only rgb label
 
     Attributes:
         im_files (list): List of image file paths. 为RGB图像路径
@@ -262,7 +265,7 @@ class RGBIRDataset(YOLODataset):
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
         self.data = data
-        self.data_mode = data_mode if data_mode in ("RGB", "T", "IR", "RGBT", "RGBT2") else "RGBT" 
+        self.data_mode = data_mode if data_mode in ("RGB", "T", "IR", "RGBT", "RGBT2", "RGBT3") else "RGBT" 
         super().__init__(*args, data=data, task=task, **kwargs)
         
     def get_img_files(self, img_path):
