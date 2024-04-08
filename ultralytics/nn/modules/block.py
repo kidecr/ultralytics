@@ -34,6 +34,7 @@ __all__ = (
     "RepC3",
     "ResNetLayer",
     "FusionTransformerDecoder",
+    "Add"
 )
 
 
@@ -744,3 +745,19 @@ class FusionTransformerDecoder(nn.Module):
         x = x.reshape(b, c, p, p, n_h, n_w).permute(0, 1, 4, 2, 5, 3)
         x = x.reshape(b, c, h, w)
         return x
+    
+class Add(nn.Module):
+    """
+    直接将两个输入相加
+
+    """
+
+    def __init__(self):
+        """Initialize ContrastiveHead with region-text similarity parameters."""
+        super().__init__()
+
+    def forward(self, x):
+        """Forward function of contrastive learning."""
+        assert isinstance(x, list), f"input x is not a list, x type is {type(x)}"
+        assert len(x) == 2, f"input tensor is not 2, but {len(x)}"
+        return x[0] + x[1]

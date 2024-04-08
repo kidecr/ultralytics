@@ -527,7 +527,8 @@ class RGBIRDataset(YOLODataset):
         if self.data_mode in ("RGB",):
             im = cv2.imread(path) # BGR
         elif self.data_mode in ("T", "IR"):
-            im = cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
+            # im = cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, np.newaxis] # T
+            im = cv2.imread(path)
         elif self.data_mode in ("RGBT2",):
             im = np.load(path) # load BGRT type image in npy format
         else:   # RGBT

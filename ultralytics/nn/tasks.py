@@ -45,6 +45,7 @@ from ultralytics.nn.modules import (
     WorldDetect,
     SplitInputImage,
     FusionTransformerDecoder,
+    Add,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -900,6 +901,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m is FusionTransformerDecoder:
             c1 = c2 = ch[f[0] if isinstance(f, list) else f]
             args = [c1, *args]
+        elif m is Add:
+            c1 = c2 = ch[f[0] if isinstance(f, list) else f]
         else:
             c2 = ch[f]
 

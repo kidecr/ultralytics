@@ -54,6 +54,9 @@ backbone:
   - [[7, 17], 1, FusionTransformerDecoder, [16, 128, 8, 1]] # layer23 对应b-B  # bx64x80x80
   - [[9, 19], 1, FusionTransformerDecoder, [8, 256, 8, 1]]  # layer24 对应a-A  # bx128x40x40
   - [[12, 22], 1, FusionTransformerDecoder, [4, 512, 8, 1]] # layer25 对应d-D  # bx256x20x20
+  # - [[7, 17], 1, Add, []] # layer23 对应b-B  # bx64x80x80
+  # - [[9, 19], 1, Add, []]  # layer24 对应a-A  # bx128x40x40
+  # - [[12, 22], 1, Add, []] # layer25 对应d-D  # bx256x20x20
 
 # YOLOv8.0n head
 head:
