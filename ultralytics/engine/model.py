@@ -418,7 +418,7 @@ class Model(nn.Module):
         prompts = args.pop("prompts", None)  # for SAM-type models
 
         if not self.predictor:
-            self.predictor = predictor or self._smart_load("predictor")(overrides=args, _callbacks=self.callbacks)
+            self.predictor = predictor or self._smart_load("predictor")(overrides=args, _callbacks=self.callbacks, ch=self.model.ch)
             self.predictor.setup_model(model=self.model, verbose=is_cli)
         else:  # only update args if predictor is already setup
             self.predictor.args = get_cfg(self.predictor.args, args)
@@ -470,6 +470,7 @@ class Model(nn.Module):
     def val(
         self,
         validator=None,
+        ch=3,
         **kwargs,
     ):
         """
@@ -499,7 +500,7 @@ class Model(nn.Module):
         custom = {"rect": True}  # method defaults
         args = {**self.overrides, **custom, **kwargs, "mode": "val"}  # highest priority args on the right
 
-        validator = (validator or self._smart_load("validator"))(args=args, _callbacks=self.callbacks)
+        validator = (validator or self._smart_load("validator"))(args=args, _callbacks=self.callbacks, ch=ch)
         validator(model=self.model)
         self.metrics = validator.metrics
         return validator.metrics

@@ -62,7 +62,7 @@ class DETRLoss(nn.Module):
         """Computes the classification loss based on predictions, target values, and ground truth scores."""
         # Logits: [b, query, num_classes], gt_class: list[[n, 1]]
         name_class = f"loss_class{postfix}"
-        bs, nq = pred_scores.shape[:2]
+        bs, nq = pred_scores.shape[:2] # nq: 预设bbox最大数量
         # one_hot = F.one_hot(targets, self.nc + 1)[..., :-1]  # (bs, num_queries, num_classes)
         one_hot = torch.zeros((bs, nq, self.nc + 1), dtype=torch.int64, device=targets.device)
         one_hot.scatter_(2, targets.unsqueeze(-1), 1)

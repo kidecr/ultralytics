@@ -645,13 +645,13 @@ class FusionTransformerDecoder(nn.Module):
         x = x[0]
         x_shape = x.shape
         # y_shape = y.shape
-        # embed_x = self.embedding(x, self.patch_size)
-        # embed_y = self.embedding(y, self.patch_size)
-        embed_x = self._process_input(x)
-        embed_y = self._process_input(y)
+        embed_x = self.embedding(x, self.patch_size)
+        embed_y = self.embedding(y, self.patch_size)
+        # embed_x = self._process_input(x)
+        # embed_y = self._process_input(y)
         embed_fusion = self.transformer_decoder(embed_x, embed_y)
-        # embed_fusion = self.unembedding(embed_fusion, x_shape, self.patch_size)
-        embed_fusion = self._process_output(embed_fusion, x_shape)
+        embed_fusion = self.unembedding(embed_fusion, x_shape, self.patch_size)
+        # embed_fusion = self._process_output(embed_fusion, x_shape)
         return embed_fusion + x
     
     
@@ -708,6 +708,7 @@ class FusionTransformerDecoder(nn.Module):
         return x
     
     def embedding(self, x: torch.Tensor, patch_size: int) -> torch.Tensor:
+        #1x64x32x32
         p = patch_size
         b, c, h, w = x.shape
         torch._assert(h % p == 0, f"feature map 'h' cannot div into patch, h:{h} p:{p}")
@@ -718,14 +719,14 @@ class FusionTransformerDecoder(nn.Module):
         # (b, c, h, w) -> (b, c, n_h, p, n_w, p)
         x = x.view(b, c, n_h, p, n_w, p)
         # (b, c, n_h, p, n_w, p) -> (b, c, (p * p), (n_h * n_w)) -> (b, c, patch, len)
-        x = x.permute(0, 1, 3, 5, 2, 4).reshape(b, c, p * p, n_h * n_w)
+        x = x.permute(0, 1, 2, 4, 3, 5).reshape(b, c, n_h * n_w, p * p)
         # (b, c, patch, len) -> (b, (c * patch), len)
-        x = x.view(b, -1, n_h * n_w)
+        x = x.view(b, -1, p * p)
         # The self attention layer expects inputs in the format (N, S, E)
         # where S is the source sequence length, N is the batch size, E is the
         # embedding dimension
         # embedding dimension should be equal to d_model!!
-        x = x.permute(0, 2, 1)
+        # x = x.permute(0, 2, 1)
         # x = self.L1(x)
         return x
     
@@ -735,14 +736,14 @@ class FusionTransformerDecoder(nn.Module):
         batch_size, seq_len, emb_dim  = x.shape
         n_h = h // p
         n_w = w // p
-        torch._assert(emb_dim == c * p * p, f"emb_dim wrong! emb_dim:{emb_dim}, c:{c}, p:{p}")
-        torch._assert(seq_len == n_h * n_w, f"seq_len wrong! n_h:{n_h}, n_w:{n_w}")
+        torch._assert(emb_dim == p * p, f"emb_dim wrong! emb_dim:{emb_dim}, p:{p}")
+        torch._assert(seq_len == c * n_h * n_w, f"seq_len wrong! seq_len:{seq_len}, c:{c}, n_h:{n_h}, n_w:{n_w}")
         torch._assert(b == batch_size, f"batch size not equal! input tensor has batch_size {batch_size}, but should be {b}")
         
-        # (N, S, E) -> (b, (c * patch), len)
-        x = x.permute(0, 2, 1)
-        # (b, (c * patch), len) -> (b, c, p, p, n_h, n_w) -> (b, c, n_h, p, n_w, p)
-        x = x.reshape(b, c, p, p, n_h, n_w).permute(0, 1, 4, 2, 5, 3)
+        # (N, S, E) -> (b, (c * len), patch_size)
+        # x = x.permute(0, 2, 1)
+        # (b, (c * len), patch_size) -> (b, c, n_h, n_w, p, p) -> (b, c, n_h, p, n_w, p)
+        x = x.reshape(b, c, n_h, n_w, p, p).permute(0, 1, 2, 4, 3, 5)
         x = x.reshape(b, c, h, w)
         return x
     

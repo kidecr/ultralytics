@@ -24,7 +24,14 @@ class VarifocalLoss(nn.Module):
 
     @staticmethod
     def forward(pred_score, gt_score, label, alpha=0.75, gamma=2.0):
-        """Computes varfocal loss."""
+        """Computes varfocal loss.
+        Args:
+          pred_score: prediction score
+          gt_score: ground truth classification score
+          label: 表示前后景概率, 为one-hot, 即将gt_score中有类别的地方置1, 无类别地方置0
+          alpha: 防止过度抑制负样本
+          gamma: 抑制负样本
+        """
         weight = alpha * pred_score.sigmoid().pow(gamma) * (1 - label) + gt_score * label
         with torch.cuda.amp.autocast(enabled=False):
             loss = (
@@ -264,6 +271,7 @@ class RGBIRLoss:
         self.device = device
 
         self.use_dfl = m.reg_max > 1
+        self.vfl = VarifocalLoss()
 
         self.assigner = TaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(m.reg_max - 1, use_dfl=self.use_dfl).to(device)
@@ -333,7 +341,14 @@ class RGBIRLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        # loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        bs, nq = pred_scores.shape[:2] # nq: 预设bbox最大数量
+        target_labels = torch.zeros((bs, nq, self.nc + 1), dtype=torch.int64, device=targets.device)
+        target_labels.scatter_(2, target_scores.type(torch.int64), 1)
+        target_labels = target_labels[..., :-1]
+        vfl_loss = self.vfl(pred_scores, target_scores, target_labels) / target_scores_sum
+        bce_loss = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum
+        loss[1] = (vfl_loss + bce_loss) / 2.0
 
         # Bbox loss
         if fg_mask.sum():

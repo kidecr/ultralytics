@@ -619,6 +619,7 @@ class BaseTrainer:
                 if f is self.best:
                     LOGGER.info(f"\nValidating {f}...")
                     self.validator.args.plots = self.args.plots
+                    self.validator.args.augment = False # 最后的验证阶段不进行数据增强
                     self.metrics = self.validator(model=f)
                     self.metrics.pop("fitness", None)
                     self.run_callbacks("on_fit_epoch_end")
