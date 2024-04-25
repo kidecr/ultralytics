@@ -167,3 +167,4 @@ pnnx*
 # nohup txum
 nohup*
 *.out
+*.txt

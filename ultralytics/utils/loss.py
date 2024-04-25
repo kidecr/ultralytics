@@ -341,14 +341,14 @@ class RGBIRLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        # loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
-        bs, nq = pred_scores.shape[:2] # nq: 预设bbox最大数量
-        target_labels = torch.zeros((bs, nq, self.nc + 1), dtype=torch.int64, device=targets.device)
-        target_labels.scatter_(2, target_scores.type(torch.int64), 1)
-        target_labels = target_labels[..., :-1]
-        vfl_loss = self.vfl(pred_scores, target_scores, target_labels) / target_scores_sum
-        bce_loss = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum
-        loss[1] = (vfl_loss + bce_loss) / 2.0
+        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        # bs, nq = pred_scores.shape[:2] # nq: 预设bbox最大数量
+        # target_labels = torch.zeros((bs, nq, self.nc + 1), dtype=torch.int64, device=targets.device)
+        # target_labels.scatter_(2, target_scores.type(torch.int64), 1)
+        # target_labels = target_labels[..., :-1]
+        # vfl_loss = self.vfl(pred_scores, target_scores, target_labels) / target_scores_sum
+        # bce_loss = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum
+        # loss[1] = (vfl_loss + bce_loss) / 2.0
 
         # Bbox loss
         if fg_mask.sum():
@@ -360,6 +360,7 @@ class RGBIRLoss:
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
+        loss[1] = loss[1] + loss[0] * 0.5
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 

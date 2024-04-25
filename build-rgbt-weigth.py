@@ -105,10 +105,19 @@ def check_backbone(rgbt_module: nn.Module, rgb_module: nn.Module, type:str):
             try:
                 rgb_v = rgbt_module["model"].state_dict()[rgbt_layer_key]
                 # print(k, rgb_layer_key, rgb_v.equal(v.cpu()))
-                print(f"{k:<30} {rgbt_layer_key:<30} {rgb_v.cpu().equal(v.cpu())}")
+                print(f"{k:<30} {rgbt_layer_key:<30} {rgb_v.cpu().type(torch.float32).equal(v.cpu().type(torch.float32))}")
             except KeyError as e:
                 break
         
+
+def load_in_ckpt():
+    """
+    将dict类型权重改成ckpt类型
+    """
+    dict_model = torch.load("rgbt.pt")
+    ckpt_model = torch.load("best.pt")
+    ckpt_model["model"] = dict_model
+    torch.save(ckpt_model, "rgbt.pt")
 
 def check_if_the_backbone_weight_is_replace():
     """
@@ -129,4 +138,5 @@ def replace_weight_in_rgbt_module():
     torch.save(rgbt_model, "rgbt-update.pt")
 
 # replace_weight_in_rgbt_module()
-# check_if_the_backbone_weight_is_replace()
+check_if_the_backbone_weight_is_replace()
+# load_in_ckpt()

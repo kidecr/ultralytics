@@ -265,7 +265,7 @@ class RGBIRDataset(YOLODataset):
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
         self.data = data
-        self.data_mode = data_mode if data_mode in ("RGB", "T", "IR", "RGBT", "RGBT2", "RGBT3") else "RGBT" 
+        self.data_mode = data_mode if data_mode in ("RGB", "T", "IR", "RGBT", "RGBT2", "RGBT3", "RGBT3-IR") else "RGBT" 
         super().__init__(*args, data=data, task=task, **kwargs)
         
     def get_img_files(self, img_path):
@@ -476,7 +476,7 @@ class RGBIRDataset(YOLODataset):
                     func=verify_image_label,
                     iterable=zip(
                         self.im_files,
-                        self.label_files,
+                        rgb2ir_paths(self.label_files) if self.data_mode in ("RGBT3-IR",) else self.label_files,
                         repeat(self.prefix),
                         repeat(self.use_keypoints),
                         repeat(len(self.data["names"])),

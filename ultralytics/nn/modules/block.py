@@ -573,6 +573,78 @@ class SplitInputImage(nn.Module):
         x = x[:, self.start:self.end]
         return x
 
+class FusionTransformerEncoderLayer(nn.TransformerEncoderLayer):
+    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
+                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+        r"""Pass the input through the encoder layer.
+
+        Args:
+            src: the sequence to the encoder layer (required).
+            src_mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
+
+        Shape:
+            see the docs in Transformer class.
+        """
+
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+
+        if (src.dim() == 3 and not self.norm_first and not self.training and
+            self.self_attn.batch_first and
+            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
+            self.norm1.eps == self.norm2.eps and
+            src_mask is None and
+                not (src.is_nested and src_key_padding_mask is not None)):
+            tensor_args = (
+                src,
+                self.self_attn.in_proj_weight,
+                self.self_attn.in_proj_bias,
+                self.self_attn.out_proj.weight,
+                self.self_attn.out_proj.bias,
+                self.norm1.weight,
+                self.norm1.bias,
+                self.norm2.weight,
+                self.norm2.bias,
+                self.linear1.weight,
+                self.linear1.bias,
+                self.linear2.weight,
+                self.linear2.bias,
+            )
+            if (not torch.overrides.has_torch_function(tensor_args) and
+                    # We have to use a list comprehension here because TorchScript
+                    # doesn't support generator expressions.
+                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
+                    (not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]))):
+                return torch._transformer_encoder_layer_fwd(
+                    src,
+                    self.self_attn.embed_dim,
+                    self.self_attn.num_heads,
+                    self.self_attn.in_proj_weight,
+                    self.self_attn.in_proj_bias,
+                    self.self_attn.out_proj.weight,
+                    self.self_attn.out_proj.bias,
+                    self.activation_relu_or_gelu == 2,
+                    False,  # norm_first, currently not supported
+                    self.norm1.eps,
+                    self.norm1.weight,
+                    self.norm1.bias,
+                    self.norm2.weight,
+                    self.norm2.bias,
+                    self.linear1.weight,
+                    self.linear1.bias,
+                    self.linear2.weight,
+                    self.linear2.bias,
+                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
+                )
+        x = src
+        if self.norm_first:
+            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
+            # x = x + self._ff_block(self.norm2(x))
+        else:
+            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask))
+            # x = self.norm2(x + self._ff_block(x))
+
+        return x
 
 class FusionTransformerDecoderLayer(nn.TransformerDecoderLayer):
     """
@@ -600,11 +672,11 @@ class FusionTransformerDecoderLayer(nn.TransformerDecoderLayer):
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
             x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
-            # x = x + self._ff_block(self.norm3(x))
+            x = x + self._ff_block(self.norm3(x))
         else:
             x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
             x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
-            # x = self.norm3(x + self._ff_block(x))
+            x = self.norm3(x + self._ff_block(x))
         return x
 
 class FusionTransformerDecoder(nn.Module):
@@ -629,10 +701,12 @@ class FusionTransformerDecoder(nn.Module):
         self.conv_t = nn.ConvTranspose2d(
             in_channels=d_model, out_channels=self.input_channel, kernel_size=patch_size, stride=patch_size
         )
-        # self.L1 = nn.Linear(self.input_channel, d_model)
-        # self.L2 = nn.Linear(d_model, self.input_channel)
-        self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=1024, norm_first=True)
+        self.embed = nn.Linear(self.patch_size * self.patch_size, d_model) if self.patch_size * self.patch_size != d_model else nn.Identity()
+        self.unembed = nn.Linear(d_model, self.patch_size * self.patch_size) if self.patch_size * self.patch_size != d_model else nn.Identity()
+        self.decoder_layer = FusionTransformerDecoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=512, norm_first=True)
         self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=n_layer)
+        self.encoder_layer = FusionTransformerEncoderLayer(d_model=d_model, nhead=n_head, dim_feedforward=512, norm_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=n_layer)
     
     def forward(self, x: list) -> torch.Tensor:    
         """
@@ -641,14 +715,15 @@ class FusionTransformerDecoder(nn.Module):
             # x: the sequence to the decoder (required).
             # y: the sequence from the last layer of the encoder (required).
         """
-        y = x[1]
-        x = x[0]
+        y = x[0]
+        x = x[1]
         x_shape = x.shape
         # y_shape = y.shape
         embed_x = self.embedding(x, self.patch_size)
         embed_y = self.embedding(y, self.patch_size)
         # embed_x = self._process_input(x)
         # embed_y = self._process_input(y)
+        embed_y = self.transformer_encoder(embed_y)
         embed_fusion = self.transformer_decoder(embed_x, embed_y)
         embed_fusion = self.unembedding(embed_fusion, x_shape, self.patch_size)
         # embed_fusion = self._process_output(embed_fusion, x_shape)
@@ -727,10 +802,13 @@ class FusionTransformerDecoder(nn.Module):
         # embedding dimension
         # embedding dimension should be equal to d_model!!
         # x = x.permute(0, 2, 1)
-        # x = self.L1(x)
+        x = self.embed(x)
         return x
     
     def unembedding(self, x: torch.Tensor, input_shape: torch.Size, patch_size: int) -> torch.Tensor:
+        # (N, S, E) -> (b, (c * len), d_model) -> (b, (c * len), patch_size)
+        x = self.unembed(x)
+        
         p = patch_size
         b, c, h, w = input_shape
         batch_size, seq_len, emb_dim  = x.shape
